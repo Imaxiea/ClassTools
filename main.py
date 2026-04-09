@@ -8,6 +8,8 @@ import os
 import uuid
 import threading
 from importlib.util import spec_from_file_location, module_from_spec
+
+from flet import Page
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -71,3 +73,267 @@ def scan_mods():
             print(f"loading Failed: {item} | {e}")
     return mods
 # ======================= #
+
+# ===== Folder Listener ===== #
+class ModWatcher(FileSystemEventHandler):
+    def __init__(self, app):
+        self.app = app
+        self._debounce_timer = None
+
+    def on_any_event(self, event):
+        if event.is_directory:
+            if self._debounce_timer:
+                self._debounce_timer.cancel()
+            self._debounce_timer = ft.Timer(
+                0.3,
+                lambda _: self._do_reload(),
+                repeat=False
+            )
+            self._debounce_timer.start()
+
+    def _do_reload(self):
+        self._debounce_timer = None
+        self.app.hot_reload()
+
+# =========================== #
+
+# ===== Mod Tab ===== #
+class ModItem(ft.Container):
+    def __init__(self, mod, app):
+        super().__init__()
+        self.mod = mod
+        self.app = app
+        self.width = 52
+        self.bgcolor = ft.colors.TRANSPARENT
+        self.border_radius = 8
+        self.padding = ft.padding.symmetric(10, 8)
+        self.animate = ft.Animation(ANIM_DURATION, ft.AnimationCurve.EASE_OUT)
+        self.on_click = lambda _: self.app.open_mod(mod.mod_id)
+        self.on_secondary_tap = self.show_menu
+        self.on_hover = self._hover
+
+        self.icon = ft.Icon(mod.icon, size=22, color=THEME["subtext"])
+        self.title = ft.Text(
+            mod.name, size=13, color=THEME["text"],
+            width=0, opacity=0, animate_opacity=ANIM_DURATION
+        )
+
+        self.content = ft.Row([self.icon, self.title], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+    def _hover(self, e):
+        if e.data == "true":
+            self.width = 150
+            self.bgcolor = THEME["hover"]
+            self.title.opacity = 1
+            self.title.width = 80
+        else:
+            self.width = 52
+            self.bgcolor = ft.colors.TRANSPARENT
+            self.title.opacity = 0
+            self.title.width = 0
+        self.update()
+
+    def show_menu(self, _):
+        total = len(self.app.config["mods"])
+        disable_del = total <= 1
+
+        menu = ft.PopupMenuButton(
+            items=[
+                ft.PopupMenuItem(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.CLOSE, color=ft.colors.RED, size=18),
+                        ft.Text("Delete", color=ft.colors.WHITE, size=14),
+                    ], spacing=8),
+                    on_click=lambda _: self.app.confirm_del(self.mod.mod_id),
+                    disabled=disable_del
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.EDIT, color=ft.colors.RED, size=18),
+                        ft.Text("Rename", size=14),
+                    ], spacing=8),
+                    on_click=lambda _: self.app.rename_mod(self.mod.mod_id)
+                ),
+                ft.PopupMenuItem(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.REFRESH, color=ft.colors.RED, size=18),
+                        ft.Text("Reload", size=14),
+                    ], spacing=8),
+                    on_click=lambda _: self.app.reload_mod(self.mod.mod_id)
+                ),
+            ]
+        )
+
+        if isinstance(self.content, ft.Row) and self.content.controls:
+            assert isinstance(menu, ft.PopupMenuButton)
+            self.content.controls[-1].visible = True
+            self.content.controls[-1].update()
+# =================== #
+
+# ===== Main Program ===== #
+class ClassTools:
+    def __init__(self, page: Page):
+        self.page = page
+        self.page.padding = 0
+        self.page.spacing = 0
+        self.page.bgcolor = THEME["bg"]
+        self.page.window_title_bar_hidden = True
+        self.page.window_frameless = True
+        self.page.window_width = 1080
+        self.page.window_height = 720
+
+        self.mods = scan_mods()
+        self.config = load_config()
+        self.current_id = None
+
+        # Left & Right Board
+        self.mod_list = ft.Column(spacing=2, scroll=ft.ScrollMode.ALWAYS)
+        self.left_bar = ft.Container(
+            content=self.mod_list,
+            width=52, bgcolor=THEME["panel"],
+            border=ft.Border(right=ft.BorderSide(1, THEME["border"])),
+            animate=ft.Animation(ANIM_DURATION)
+        )
+        self.placeholder = ft.Icon(ft.Icons.CHECK_ROUNDED, size=70, color="#444444")
+        self.content_panel = ft.Container(
+            content=self.placeholder,
+            expand=True, alignment=ft.Alignment.CENTER, bgcolor=THEME["bg"]
+        )
+
+        # Root
+        self.page.add(
+            ft.WindowDragArea(
+                ft.Row([self.left_bar, self.content_panel], expand=True, spacing=0),
+                maximizable=False
+            )
+        )
+
+        self.refresh_list()
+        self.start_watcher()
+
+    # Refresh Function
+    def refresh_list(self):
+        self.mod_list.controls.clear()
+        for mid in self.config["mods"]:
+            if mid in self.mods:
+                self.mod_list.controls.append(ModItem(self.mods[mid], self))
+        self.mod_list.update()
+
+    # Mod Opener Tool
+    def open_mod(self, mid):
+        self.current_id = mid
+        ui = self.mods[mid].build_ui(self.page)
+        self.content_panel.content = ui
+        self.content_panel.update()
+
+    # Hot Reload Function
+    def hot_reload(self):
+        new_mods = scan_mods()
+        self.mods = new_mods
+        ft.Timer(0, self.refresh_list, repeat=False).start()
+
+    # Mod Reloader
+    def reload_mod(self, mid):
+        self.hot_reload()
+        if self.current_id == mid:
+            self.open_mod(mid)
+
+    # Mod Renamer
+    def rename_mod(self, mid):
+        mod = self.mods[mid]
+
+        def close_dlg(_):
+            self.page.dialog = None
+            self.page.update()
+
+        def ok(_):
+            val = tf.value.strip()
+            if val:
+                mod.name = val
+                self.refresh_list()
+            close_dlg(_)
+
+        tf = ft.TextField(
+            label='New Name',
+            value=mod.name,
+            bgcolor=THEME['panel'],
+            color=THEME['text']
+        )
+
+        dlg = ft.AlertDialog(
+            title=ft.Text('Rename MOD', color=THEME['text']),
+            content=tf,
+            actions=[
+                ft.Button(
+                    'Cancel',
+                    on_click=close_dlg,
+                    color=THEME['text'],
+                    style=ft.ButtonStyle(
+                        bgcolor=ft.colors.TRANSPARENT,
+                        elevation=0
+                    )
+                ),
+                ft.Button(
+                    'Confirm',
+                    on_click=ok,
+                    color=THEME['text'],
+                    style=ft.ButtonStyle(
+                        bgcolor=THEME['accent'],
+                        elevation=2
+                    )
+                )
+            ],
+            bgcolor=THEME['panel']
+        )
+
+        self.page.dialog = dlg
+        self.page.update()
+
+    # Mod Deleter
+    def confirm_del(self, mid):
+        def close_dlg(_):
+            self.page.dialog = None
+            self.page.update()
+
+        def ok(_):
+            self.config['mods'].remove(mid)
+            save_config(self.config)
+            if self.current_id == mid:
+                self.content_panel.content = self.placeholder
+                self.current_id = None
+                self.content_panel.update()
+            self.refresh_list()
+            close_dlg(_)
+
+        dlg = ft.AlertDialog(
+            title=ft.Text('Confirm Delete', color=THEME['text']),
+            content=ft.Text('This MOD will be deleted from MOD Tab, Continue?', color=THEME['text']),
+            actions=[
+                ft.Button(
+                    'Cancel',
+                    on_click=close_dlg,
+                    color=THEME["text"]
+                ),
+                ft.Button(
+                    'Confirm',
+                    on_click=ok,
+                    color=ft.colors.RED
+                )
+            ],
+            bgcolor=THEME["panel"]
+        )
+
+        self.page.dialog = dlg
+        self.page.update()
+
+    def start_watcher(self):
+        handler = ModWatcher(self)
+        observer = Observer()
+        observer.schedule(handler, MODS_PATH, recursive=True)
+        observer.start()
+
+def main(page: ft.Page):
+    ClassTools(page)
+
+if __name__ == "__main__":
+    ft.app(target=main)
