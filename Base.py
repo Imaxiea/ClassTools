@@ -27,3 +27,11 @@ class Base(ABC):
     def build(self, page: Page) -> Control:
         pass
 
+    @abstractmethod
+    def init(self):
+        pass
+
+    @abstractmethod
+    def destroy(self):
+        pass
+

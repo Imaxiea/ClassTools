@@ -6,7 +6,7 @@ import os
 import importlib.util
 from Base import Base
 from flet import Page, Icon, Icons, Colors, Text, TextAlign, Container, Padding, Animation, Row, MainAxisAlignment, \
-    Column, AnimationCurve, IconData, Alignment, padding, CrossAxisAlignment
+    Column, AnimationCurve, IconData, Alignment, padding
 from typing import List, Optional
 
 
@@ -18,21 +18,21 @@ class ModManager:
         self.load_mods()
 
     def load_mods(self):
-        mods_dir = "mods"
+        mods_dir = 'mods'
         if not os.path.exists(mods_dir):
             os.makedirs(mods_dir)
             return
 
         for mod_name in os.listdir(mods_dir):
-            mod_path = os.path.join(mods_dir, mod_name, "main.py")
+            mod_path = os.path.join(mods_dir, mod_name, 'main.py')
             if not os.path.exists(mod_path):
                 continue
 
             spec: Optional[importlib.util.ModuleSpec] = importlib.util.spec_from_file_location(
-                f"mods.{mod_name}.main", mod_path
+                f'mods.{mod_name}.main', mod_path
             )
             if spec is None:
-                print(f"警告：无法加载Mod {mod_name}，模块规范创建失败")
+                print(f'警告：无法加载Mod {mod_name}，模块规范创建失败')
                 continue
 
             mod_module = importlib.util.module_from_spec(spec)
@@ -47,13 +47,44 @@ class ModManager:
                     break
 
     def create_mod_sidebar_item(self, mod: Base, sidebar_expanded_width: int) -> Container:
+        is_selected = False
+
         def icon_data(icon_str: str) -> IconData:
             icon_str = icon_str.strip().upper()
             try:
                 return getattr(Icons, icon_str)
             except AttributeError:
-                print(f"警告：Mod {mod.name} 的图标 {icon_str} 不存在，使用默认图标")
+                print(f'警告：Mod {mod.name} 的图标 {icon_str} 不存在，使用默认图标')
                 return Icons.QUESTION_MARK
+
+        def on_mod_click(_):
+            nonlocal is_selected
+
+            is_selected = not is_selected
+            icon_container.bgcolor = Colors.with_opacity(0.2,Colors.WHITE) if is_selected else Colors.TRANSPARENT
+            mod_item.update()
+
+            sidebar_column = self.page.controls[0].controls[0].content
+            for item in sidebar_column.controls:
+                if item != mod_item:
+                    item_icon_container = item.content.controls[0]
+                    item_mod_icon = item_icon_container.content
+                    item_icon_container.bgcolor = Colors.TRANSPARENT
+                    item_mod_icon.filled = False
+                    item_icon_container.update()
+                    item_mod_icon.update()
+            if not is_selected:
+                is_selected = True
+                icon_container.bgcolor = Colors.with_opacity(0.2, Colors.WHITE)
+                mod_icon.filled = True
+            icon_container.update()
+            mod_icon.update()
+
+            root_row = self.page.controls[0]
+            right_column = root_row.controls[1]
+            main_content = right_column.controls[1]
+            main_content.content = mod.build(self.page)
+            main_content.update()
 
         mod_icon = Icon(
             icon=icon_data(mod.icon),
@@ -66,7 +97,11 @@ class ModManager:
             border_radius=6,
             alignment=Alignment.CENTER,
             padding=padding.all(12),
-            bgcolor=Colors.with_opacity(0.2, Colors.WHITE),
+            bgcolor=Colors.with_opacity(0.2, Colors.WHITE) if is_selected else Colors.TRANSPARENT,
+            animate=Animation(
+                duration=300,
+                curve=AnimationCurve.EASE_IN_OUT
+            ),
         )
 
         mod_name_text = Text(
@@ -93,7 +128,7 @@ class ModManager:
             ),
             height=50,
             padding=Padding(left=15, right=15),
-            on_click=lambda e, m=mod: self.on_mod_click(m),
+            on_click=on_mod_click,
             border_radius=4,
             data=mod.id,
         )
@@ -101,6 +136,7 @@ class ModManager:
         mod_item.update_name_visibility = lambda is_expanded: self.update_mod_item_visibility(
             mod_item, is_expanded, sidebar_expanded_width
         )
+
         return mod_item
 
     @staticmethod
@@ -136,11 +172,11 @@ class ModManager:
 
     def update_all_mod_items(self, is_expanded: bool, sidebar_expanded_width: int):
         for mod_item in self.create_sidebar_content(sidebar_expanded_width).controls:
-            if hasattr(mod_item, "update_name_visibility"):
+            if hasattr(mod_item, 'update_name_visibility'):
                 mod_item.update_name_visibility(is_expanded)
 
 def get_truncated_name(name: str, max_width: int) -> str:
     max_chars = max_width // 8 - 1
     if len(name) > max_chars:
-        return name[:max_chars] + "...."
+        return name[:max_chars] + '....'
     return name

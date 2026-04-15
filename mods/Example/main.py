@@ -18,7 +18,6 @@ class ExampleMod(Base):
     def icon(self) -> str:
         return "STAR_BORDER"
 
-    # 必须实现的抽象方法
     def build(self, page: ft.Page) -> ft.Control:
         return ft.Container(
             content=ft.Column(
@@ -45,7 +44,6 @@ class ExampleMod(Base):
         print(f"[{self.name}] 已初始化")
 
     def destroy(self):
-
         print(f"[{self.name}] 已销毁")
 
 

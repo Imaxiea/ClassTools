@@ -4,6 +4,8 @@
 # => Copyright Apathy 3.0 <=
 import flet as ft
 from time import sleep
+from Base import Base
+from modmanager import ModManager
 
 
 # Main Function
@@ -17,13 +19,13 @@ def main(page: ft.Page):
 
     sidebar = ft.Ref[ft.Container]
     sidebar_clicked = ft.Ref[ft.Container]
-    SIDEBAR_COLLAPSED_WIDTH = 60
-    SIDEBAR_EXPANDED_WIDTH = 150
+    SIDEBAR_COLLAPSED_WIDTH = 75
+    SIDEBAR_EXPANDED_WIDTH = 190
     MAIN_PANEL_WIDTH = 1440
     if sidebar:
-        WINDOW_WIDTH = MAIN_PANEL_WIDTH + 250
+        WINDOW_WIDTH = MAIN_PANEL_WIDTH + 190
     else:
-        WINDOW_WIDTH = MAIN_PANEL_WIDTH + 60
+        WINDOW_WIDTH = MAIN_PANEL_WIDTH + 75
     WINDOW_HEIGHT = 800
 
     page.window_width = WINDOW_WIDTH
@@ -46,6 +48,8 @@ def main(page: ft.Page):
         e.control.update()
 
     async def close_app(_):
+        for mod in mod_manager.mods:
+            mod.destroy()
         await page.window.close()
         page.update()
 
@@ -107,35 +111,38 @@ def main(page: ft.Page):
     )
 
     ########## Side Bar ##########
+    mod_manager = ModManager(page)
+
+    sidebar_content = mod_manager.create_sidebar_content(SIDEBAR_EXPANDED_WIDTH)
+    sidebar_clicked = False
+
+    def update_mod_items_visibility(is_expanded):
+        for mod_item in sidebar_content.controls:
+            if hasattr(mod_item, "update_name_visibility"):
+                mod_item.update_name_visibility(is_expanded)
+
     def handle_sidebar_click(_):
-        sidebar_clicked.current = not sidebar_clicked.current
-        if sidebar_clicked.current:
-            sidebar_container.width = SIDEBAR_EXPANDED_WIDTH
-            sidebar.current = True
-        else:
-            sidebar_container.width = SIDEBAR_COLLAPSED_WIDTH
-            sidebar.current = False
+        nonlocal sidebar_clicked
+        sidebar_clicked = not sidebar_clicked
+        sidebar_container.width = SIDEBAR_EXPANDED_WIDTH if sidebar_clicked else SIDEBAR_COLLAPSED_WIDTH
+        update_mod_items_visibility(sidebar_clicked)
         sidebar_container.update()
 
     def handle_sidebar_hover(e):
+        nonlocal sidebar_clicked
         is_hover = e.data == "true" or e.data is True
         sleep(0.2)
-        if is_hover:
-            sidebar_container.width = SIDEBAR_EXPANDED_WIDTH
-            sidebar.current = True
-        else:
-            sidebar_container.width = SIDEBAR_COLLAPSED_WIDTH
-            sidebar.current = False
-        sidebar_container.update()
+        if not sidebar_clicked:
+            sidebar_container.width = SIDEBAR_EXPANDED_WIDTH if is_hover else SIDEBAR_COLLAPSED_WIDTH
+            update_mod_items_visibility(is_hover)
+            sidebar_container.update()
 
     sidebar_container = ft.Container(
-        content=ft.Container(
-            expand=True,
-            bgcolor=ft.Colors.BLUE_GREY_900,
-        ),
+        content=sidebar_content,
         width=SIDEBAR_COLLAPSED_WIDTH,
         height=None,
         animate=ft.Animation(300, ft.AnimationCurve.EASE_IN_OUT),
+        bgcolor=ft.Colors.BLUE_GREY_900,
         border_radius=ft.border_radius.only(top_right=8, bottom_right=8),
         on_click=handle_sidebar_click,
         on_hover=handle_sidebar_hover,
@@ -145,15 +152,26 @@ def main(page: ft.Page):
     ########## Root Panel ##########
     main_content = ft.Container(
         content=ft.Text(
-            value=f"ClassTools 主界面\n侧边栏状态: {'展开' if sidebar.current else '收起'}\n点击右侧侧边栏任意位置切换状态",
+            value=f"ClassTools 主界面\n"
+                  f"已加载Mod数量: {len(mod_manager.mods)}\n"
+                  f"点击侧边栏Mod图标查看功能",
             size=16,
             text_align=ft.TextAlign.CENTER,
             color=ft.Colors.GREY_700,
         ),
         alignment=ft.Alignment.CENTER,
         expand=True,
-        bgcolor=page.bgcolor
+        bgcolor=page.bgcolor,
+        margin=ft.margin.all(10),
+        padding = ft.padding.all(10)
     )
+
+    def on_mod_click_custom(mod: Base):
+        nonlocal main_content
+        main_content.content = mod.build(page)
+        main_content.update()
+
+    mod_manager.on_mod_click = on_mod_click_custom
 
     right_column = ft.Column(
         controls=[
@@ -172,6 +190,7 @@ def main(page: ft.Page):
         spacing=0,
         expand=True
     )
+
     page.add(root)
 
 if __name__ == "__main__":
